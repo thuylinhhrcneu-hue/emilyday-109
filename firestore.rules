@@ -1,0 +1,92 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all fallback
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'thuylinhhrcneu@gmail.com' && request.auth.token.email_verified == true) ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    // 1. Newsletter subscribers
+    match /subscribers/{subscriberId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(subscriberId) &&
+        request.resource.data.keys().hasAll(['email', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['email', 'name', 'interest', 'createdAt']) &&
+        isValidString(request.resource.data.email, 3, 150) &&
+        isValidString(request.resource.data.createdAt, 5, 50) &&
+        (!('name' in request.resource.data) || isValidString(request.resource.data.name, 1, 100)) &&
+        (!('interest' in request.resource.data) || isValidString(request.resource.data.interest, 1, 100));
+      allow update, delete: if isAdmin();
+    }
+
+    // 2. Collaboration inquiries (B2B, Brands, Mentorship, Speaking)
+    match /inquiries/{inquiryId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(inquiryId) &&
+        request.resource.data.keys().hasAll(['name', 'email', 'serviceType', 'message', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'email', 'organization', 'serviceType', 'message', 'budgetRange', 'createdAt', 'status']) &&
+        isValidString(request.resource.data.name, 1, 100) &&
+        isValidString(request.resource.data.email, 3, 150) &&
+        isValidString(request.resource.data.serviceType, 1, 100) &&
+        isValidString(request.resource.data.message, 1, 2000) &&
+        isValidString(request.resource.data.createdAt, 5, 50) &&
+        (!('organization' in request.resource.data) || isValidString(request.resource.data.organization, 1, 150)) &&
+        (!('budgetRange' in request.resource.data) || isValidString(request.resource.data.budgetRange, 1, 100)) &&
+        (!('status' in request.resource.data) || isValidString(request.resource.data.status, 1, 50));
+      allow update, delete: if isAdmin();
+    }
+
+    // 3. Article Likes (Public read, public increment)
+    match /article_likes/{articleId} {
+      allow get, list: if true;
+      allow create: if isValidId(articleId) &&
+        request.resource.data.keys().hasAll(['articleId', 'likesCount']) &&
+        request.resource.data.keys().hasOnly(['articleId', 'likesCount', 'updatedAt']) &&
+        request.resource.data.articleId == articleId &&
+        request.resource.data.likesCount is number &&
+        request.resource.data.likesCount >= 0 &&
+        (!('updatedAt' in request.resource.data) || isValidString(request.resource.data.updatedAt, 5, 50));
+      allow update: if isValidId(articleId) &&
+        request.resource.data.articleId == articleId &&
+        request.resource.data.likesCount is number &&
+        request.resource.data.likesCount == resource.data.likesCount + 1 &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // 4. Article Comments (Public read, public create with clean constraints)
+    match /article_comments/{commentId} {
+      allow get, list: if true;
+      allow create: if isValidId(commentId) &&
+        request.resource.data.keys().hasAll(['articleId', 'authorName', 'comment', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['articleId', 'authorName', 'comment', 'createdAt']) &&
+        isValidString(request.resource.data.articleId, 1, 100) &&
+        isValidString(request.resource.data.authorName, 1, 100) &&
+        isValidString(request.resource.data.comment, 1, 1000) &&
+        isValidString(request.resource.data.createdAt, 5, 50);
+      allow update, delete: if isAdmin();
+    }
+  }
+}
